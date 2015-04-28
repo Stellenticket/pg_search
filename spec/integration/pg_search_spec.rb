@@ -186,6 +186,22 @@ describe "an Active Record model which includes PgSearch" do
         end
       end
 
+      context "when chained with a second pg_search_scope" do
+        before do
+          ModelWithPgSearch.pg_search_scope :search_title, :against => :title
+        end
+
+        it "should work" do
+          included = ModelWithPgSearch.create!(content: 'foo', title: 'bar')
+          excluded = ModelWithPgSearch.create!(content: 'bar', title: 'foo')
+
+          results = ModelWithPgSearch.search_content('foo').search_title('bar')
+
+          expect(results).to include included
+          expect(results).not_to include excluded
+        end
+      end
+
       context "chained to a cross-table scope" do
         with_model :House do
           table do |t|
@@ -209,6 +225,68 @@ describe "an Active Record model which includes PgSearch" do
             pg_search_scope :named, against: [:name]
             scope :with_house_in_city, ->(city) {
               joins(:houses).where(House.table_name.to_sym => {city: city})
+            }
+          end
+        end
+
+        it "works when the other scope is last" do
+          house_in_duluth = House.create!(city: "Duluth")
+          second_house_in_duluth = House.create!(city: "Duluth")
+          house_in_sheboygan = House.create!(city: "Sheboygan")
+
+          bob_in_duluth =
+            Person.create!(name: "Bob", houses: [house_in_duluth])
+          bob_in_sheboygan =
+            Person.create!(name: "Bob", houses: [house_in_sheboygan])
+          sally_in_duluth =
+            Person.create!(name: "Sally", houses: [second_house_in_duluth])
+
+          results = Person.named("bob").with_house_in_city("Duluth")
+          expect(results).to include bob_in_duluth
+          expect(results).not_to include [bob_in_sheboygan, sally_in_duluth]
+        end
+
+        it "works when the other scope is first" do
+          house_in_duluth = House.create!(city: "Duluth")
+          second_house_in_duluth = House.create!(city: "Duluth")
+          house_in_sheboygan = House.create!(city: "Sheboygan")
+
+          bob_in_duluth =
+            Person.create!(name: "Bob", houses: [house_in_duluth])
+          bob_in_sheboygan =
+            Person.create!(name: "Bob", houses: [house_in_sheboygan])
+          sally_in_duluth =
+            Person.create!(name: "Sally", houses: [second_house_in_duluth])
+
+          results = Person.with_house_in_city("Duluth").named("Bob")
+          expect(results).to include bob_in_duluth
+          expect(results).not_to include [bob_in_sheboygan, sally_in_duluth]
+        end
+      end
+
+      context "chained to a cross-table pg_search_scope" do
+        with_model :House do
+          table do |t|
+            t.references :person
+            t.string :city
+          end
+
+          model do
+            belongs_to :person
+          end
+        end
+
+        with_model :Person do
+          table do |t|
+            t.string :name
+          end
+
+          model do
+            include PgSearch
+            has_many :houses
+            pg_search_scope :named, against: [:name]
+            pg_search_scope :with_house_in_city, associated_against: {
+              houses: [:city]
             }
           end
         end
